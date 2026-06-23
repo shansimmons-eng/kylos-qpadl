@@ -1,0 +1,22 @@
+[package]
+name = "kylos-qpadl"
+version = "0.1.0"
+edition = "2024"
+description = "QPADL: three-family post-quantum signatures for Kylos Arc — MAYO/UOV (MQ Speed), ML-DSA-65 (Lattice Primary), SPHINCS+ (Hash Anchor), Falcon-512 (temporary patch)"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[[bin]]
+name = "kylos-bench"
+path = "src/bin/benchmark.rs"
+
+[[bin]]
+name = "kylos-test-vectors"
+path = "src/bin/test_vectors.rs"

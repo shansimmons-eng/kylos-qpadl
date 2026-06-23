@@ -1,0 +1,214 @@
+name: Kylos Arc QPADL CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  build-liboqs:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Create liboqs source from oqs-sys
+        run: |
+          SRC_DIR=$(ls -d $HOME/.cargo/registry/src/index.crates.io-*/oqs-sys-*/liboqs 2>/dev/null | head -1)
+          if [ -z "$SRC_DIR" ]; then
+            mkdir -p /tmp/liboqs_src
+            cd /tmp
+            curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz
+            mv liboqs-0.13.0 liboqs_src
+            SRC_DIR=/tmp/liboqs_src
+          fi
+          echo "LIBOQS_SRC=$SRC_DIR" >> $GITHUB_ENV
+      - name: Build liboqs (with MAYO + Falcon)
+        run: |
+          mkdir -p /tmp/liboqs_build /tmp/liboqs_install
+          cmake "$LIBOQS_SRC" \
+            -DOQS_BUILD_ONLY_LIB=Yes \
+            -DOQS_DIST_BUILD=Yes \
+            -DOQS_ENABLE_SIG_MAYO=Yes \
+            -DOQS_ENABLE_SIG_FALCON=Yes \
+            -DOQS_USE_OPENSSL=No \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install
+          cmake --build . --target install --config Release -j$(nproc)
+        working-directory: /tmp/liboqs_build
+      - name: Verify liboqs
+        run: ls -la /tmp/liboqs_install/lib/liboqs.a
+      - name: Upload liboqs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liboqs-${{ matrix.arch }}
+          path: /tmp/liboqs_install
+
+  test-x86_64:
+    needs: build-liboqs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Download liboqs
+        uses: actions/download-artifact@v4
+        with:
+          name: liboqs-x86_64
+          path: /tmp/liboqs_install
+      - name: Build
+        run: cargo build --release
+      - name: Generate test vectors
+        run: cargo run --release --bin kylos-test-vectors generate
+      - name: Verify test vectors
+        run: cargo run --release --bin kylos-test-vectors verify
+      - name: Run unit tests
+        run: cargo test --release
+      - name: Benchmark MAYO
+        run: cargo run --release --bin kylos-bench mayo
+      - name: Benchmark Falcon
+        run: cargo run --release --bin kylos-bench falcon
+      - name: Constant-time audit
+        run: cargo run --release --bin kylos-bench audit --verbose
+      - name: Archive benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-x86_64
+          path: benchmark_results.csv
+      - name: Archive audit results
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-x86_64
+          path: constant_time_audit.csv
+
+  # Native cross-compilation (not via cross-rs Docker):
+  # cross-rs Docker images ship old GCC (5.4.0 on Ubuntu 16.04)
+  # which cannot compile liboqs (requires GCC 7.1+).
+  # Ubuntu 24.04 runners have gcc-aarch64-linux-gnu 13.2.0 via apt.
+  test-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Install cross toolchain + QEMU
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            cmake ninja-build \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            qemu-user-static
+      - name: Build liboqs for aarch64
+        run: |
+          SRC_DIR=$(ls -d $HOME/.cargo/registry/src/index.crates.io-*/oqs-sys-*/liboqs 2>/dev/null | head -1)
+          if [ -z "$SRC_DIR" ]; then
+            mkdir -p /tmp/liboqs_src
+            curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1
+            SRC_DIR=/tmp/liboqs_src
+          fi
+          mkdir -p /tmp/liboqs_build /tmp/liboqs_install_aarch64
+          cd /tmp/liboqs_build
+          cmake "$SRC_DIR" \
+            -DOQS_BUILD_ONLY_LIB=Yes \
+            -DOQS_DIST_BUILD=Yes \
+            -DOQS_ENABLE_SIG_MAYO=Yes \
+            -DOQS_ENABLE_SIG_FALCON=Yes \
+            -DOQS_USE_OPENSSL=No \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install_aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+          cmake --build . --target install --config Release -j$(nproc)
+      - name: Set up Rust cross-compilation
+        run: |
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER=qemu-aarch64-static" >> $GITHUB_ENV
+          echo "LIBOQS_INSTALL_DIR=/tmp/liboqs_install_aarch64" >> $GITHUB_ENV
+      - name: Build for aarch64
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+      - name: Run unit tests via QEMU
+        run: cargo test --release --target aarch64-unknown-linux-gnu -- --test-threads=1
+
+  test-riscv64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv64gc-unknown-linux-gnu
+      - name: Install cross toolchain + QEMU
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            cmake ninja-build \
+            gcc-riscv64-linux-gnu g++-riscv64-linux-gnu \
+            qemu-user-static
+      - name: Build liboqs for riscv64
+        run: |
+          SRC_DIR=$(ls -d $HOME/.cargo/registry/src/index.crates.io-*/oqs-sys-*/liboqs 2>/dev/null | head -1)
+          if [ -z "$SRC_DIR" ]; then
+            mkdir -p /tmp/liboqs_src
+            curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1
+            SRC_DIR=/tmp/liboqs_src
+          fi
+          mkdir -p /tmp/liboqs_build /tmp/liboqs_install_riscv64
+          cd /tmp/liboqs_build
+          cmake "$SRC_DIR" \
+            -DOQS_BUILD_ONLY_LIB=Yes \
+            -DOQS_DIST_BUILD=Yes \
+            -DOQS_ENABLE_SIG_MAYO=Yes \
+            -DOQS_ENABLE_SIG_FALCON=Yes \
+            -DOQS_USE_OPENSSL=No \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install_riscv64 \
+            -DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=riscv64-linux-gnu-g++
+          cmake --build . --target install --config Release -j$(nproc)
+      - name: Set up Rust cross-compilation
+        run: |
+          echo "CC_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "AR_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-ar" >> $GITHUB_ENV
+          echo "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER=qemu-riscv64-static" >> $GITHUB_ENV
+          echo "LIBOQS_INSTALL_DIR=/tmp/liboqs_install_riscv64" >> $GITHUB_ENV
+      - name: Build for riscv64
+        run: cargo build --release --target riscv64gc-unknown-linux-gnu
+      - name: Run unit tests via QEMU
+        run: cargo test --release --target riscv64gc-unknown-linux-gnu -- --test-threads=1
+
+  aggregate:
+    if: always()
+    needs: [lint, build-liboqs, test-x86_64, test-aarch64, test-riscv64]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "## Kylos Arc QPADL CI Summary" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          for job in lint build-liboqs test-x86_64 test-aarch64 test-riscv64; do
+            echo "| $job | \${{ needs.$job.result }} |" >> $GITHUB_STEP_SUMMARY
+          done

@@ -1,0 +1,29 @@
+# Cross-rs configuration.
+#
+# NOTE: cross-rs images (`ghcr.io/cross-rs/*:latest`) ship GCC 5.4.0
+# which cannot compile liboqs (requires GCC 7.1+). The pre-build steps
+# below will fail with "gcc: internal compiler error" on old GCC.
+#
+# For local cross-compilation, use native toolchains instead:
+#   bash scripts/cross_compile.sh native
+# Requires: sudo apt install gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu
+#
+# CI uses native cross-compilation (see .github/workflows/ci.yml).
+
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:latest"
+
+[target.riscv64gc-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/riscv64gc-unknown-linux-gnu:latest"
+
+[build]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH || true",
+    "apt-get update",
+    "apt-get install -y cmake ninja-build curl xz-utils",
+    "mkdir -p /tmp/liboqs_src /tmp/liboqs_build /tmp/liboqs_install",
+    "curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1",
+    "cd /tmp/liboqs_build && CC=$CC CXX=$CXX cmake /tmp/liboqs_src -DOQS_BUILD_ONLY_LIB=Yes -DOQS_DIST_BUILD=Yes -DOQS_ENABLE_SIG_MAYO=Yes -DOQS_ENABLE_SIG_FALCON=Yes -DOQS_USE_OPENSSL=No -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install",
+    "cmake --build /tmp/liboqs_build --target install --config Release -j$(nproc)",
+    "test -f /tmp/liboqs_install/lib/liboqs.a",
+]
