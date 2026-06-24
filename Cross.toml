@@ -22,8 +22,8 @@ pre-build = [
     "apt-get update",
     "apt-get install -y cmake ninja-build curl xz-utils",
     "mkdir -p /tmp/liboqs_src /tmp/liboqs_build /tmp/liboqs_install",
-    "curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1",
-    "cd /tmp/liboqs_build && CC=$CC CXX=$CXX cmake /tmp/liboqs_src -DOQS_BUILD_ONLY_LIB=Yes -DOQS_DIST_BUILD=Yes -DOQS_ENABLE_SIG_MAYO=Yes -DOQS_ENABLE_SIG_FALCON=Yes -DOQS_USE_OPENSSL=No -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install",
+    "curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/${LIBOQS_VERSION:-0.13.0}.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1",
+    "cd /tmp/liboqs_build && CC=$CC CXX=$CXX cmake /tmp/liboqs_src -DOQS_BUILD_ONLY_LIB=Yes -DOQS_DIST_BUILD=Yes -DOQS_ENABLE_SIG_MAYO=Yes -DOQS_USE_OPENSSL=No -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install",
     "cmake --build /tmp/liboqs_build --target install --config Release -j$(nproc)",
     "test -f /tmp/liboqs_install/lib/liboqs.a",
 ]

@@ -1,3 +1,11 @@
+//! Test vectors and key material for QPADL signature schemes.
+//!
+//! # Security note
+//! All key files under `test_vectors/` (`.pk`, `.sk`, `.sig`) are throwaway
+//! CI/development fixtures generated at build time. They are **not** production
+//! credentials. The secret keys are committed only to enable deterministic
+//! verification tests across environments. Rotate before any production use.
+
 use crate::sig;
 use std::path::Path;
 

@@ -70,7 +70,8 @@ native_build() {
     if [ -z "$src_dir" ]; then
         echo "Fetching liboqs source..."
         mkdir -p /tmp/liboqs_src
-        curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1
+        LIBOQS_VERSION="${LIBOQS_VERSION:-0.13.0}"
+        curl -fsSL "https://github.com/open-quantum-safe/liboqs/archive/refs/tags/${LIBOQS_VERSION}.tar.gz" | tar xz -C /tmp/liboqs_src --strip-components=1
         src_dir=/tmp/liboqs_src
     fi
 

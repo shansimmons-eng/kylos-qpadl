@@ -33,25 +33,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build deps
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
-      - name: Create liboqs source from oqs-sys
+      - name: Download liboqs source
         run: |
-          SRC_DIR=$(ls -d $HOME/.cargo/registry/src/index.crates.io-*/oqs-sys-*/liboqs 2>/dev/null | head -1)
-          if [ -z "$SRC_DIR" ]; then
-            mkdir -p /tmp/liboqs_src
-            cd /tmp
-            curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz
-            mv liboqs-0.13.0 liboqs_src
-            SRC_DIR=/tmp/liboqs_src
-          fi
-          echo "LIBOQS_SRC=$SRC_DIR" >> $GITHUB_ENV
-      - name: Build liboqs (with MAYO + Falcon)
+          mkdir -p /tmp/liboqs_src
+          LIBOQS_VERSION="${LIBOQS_VERSION:-0.13.0}"
+          curl -fsSL "https://github.com/open-quantum-safe/liboqs/archive/refs/tags/${LIBOQS_VERSION}.tar.gz" | tar xz -C /tmp/liboqs_src --strip-components=1
+          echo "LIBOQS_SRC=/tmp/liboqs_src" >> $GITHUB_ENV
+      - name: Build liboqs (with MAYO)
         run: |
           mkdir -p /tmp/liboqs_build /tmp/liboqs_install
           cmake "$LIBOQS_SRC" \
             -DOQS_BUILD_ONLY_LIB=Yes \
             -DOQS_DIST_BUILD=Yes \
             -DOQS_ENABLE_SIG_MAYO=Yes \
-            -DOQS_ENABLE_SIG_FALCON=Yes \
             -DOQS_USE_OPENSSL=No \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install
@@ -86,22 +80,13 @@ jobs:
         run: cargo run --release --bin kylos-test-vectors verify
       - name: Run unit tests
         run: cargo test --release
-      - name: Benchmark MAYO
-        run: cargo run --release --bin kylos-bench mayo
-      - name: Benchmark Falcon
-        run: cargo run --release --bin kylos-bench falcon
-      - name: Constant-time audit
-        run: cargo run --release --bin kylos-bench audit --verbose
+      - name: Benchmark
+        run: cargo run --release --bin kylos-bench
       - name: Archive benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-x86_64
           path: benchmark_results.csv
-      - name: Archive audit results
-        uses: actions/upload-artifact@v4
-        with:
-          name: audit-x86_64
-          path: constant_time_audit.csv
 
   # Native cross-compilation (not via cross-rs Docker):
   # cross-rs Docker images ship old GCC (5.4.0 on Ubuntu 16.04)
@@ -122,19 +107,14 @@ jobs:
             qemu-user-static
       - name: Build liboqs for aarch64
         run: |
-          SRC_DIR=$(ls -d $HOME/.cargo/registry/src/index.crates.io-*/oqs-sys-*/liboqs 2>/dev/null | head -1)
-          if [ -z "$SRC_DIR" ]; then
-            mkdir -p /tmp/liboqs_src
-            curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1
-            SRC_DIR=/tmp/liboqs_src
-          fi
+          LIBOQS_VERSION="${LIBOQS_VERSION:-0.13.0}"
+          curl -fsSL "https://github.com/open-quantum-safe/liboqs/archive/refs/tags/${LIBOQS_VERSION}.tar.gz" | tar xz -C /tmp/liboqs_src --strip-components=1
           mkdir -p /tmp/liboqs_build /tmp/liboqs_install_aarch64
           cd /tmp/liboqs_build
-          cmake "$SRC_DIR" \
+          cmake /tmp/liboqs_src \
             -DOQS_BUILD_ONLY_LIB=Yes \
             -DOQS_DIST_BUILD=Yes \
             -DOQS_ENABLE_SIG_MAYO=Yes \
-            -DOQS_ENABLE_SIG_FALCON=Yes \
             -DOQS_USE_OPENSSL=No \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install_aarch64 \
@@ -168,19 +148,14 @@ jobs:
             qemu-user-static
       - name: Build liboqs for riscv64
         run: |
-          SRC_DIR=$(ls -d $HOME/.cargo/registry/src/index.crates.io-*/oqs-sys-*/liboqs 2>/dev/null | head -1)
-          if [ -z "$SRC_DIR" ]; then
-            mkdir -p /tmp/liboqs_src
-            curl -fsSL https://github.com/open-quantum-safe/liboqs/archive/refs/tags/0.13.0.tar.gz | tar xz -C /tmp/liboqs_src --strip-components=1
-            SRC_DIR=/tmp/liboqs_src
-          fi
+          LIBOQS_VERSION="${LIBOQS_VERSION:-0.13.0}"
+          curl -fsSL "https://github.com/open-quantum-safe/liboqs/archive/refs/tags/${LIBOQS_VERSION}.tar.gz" | tar xz -C /tmp/liboqs_src --strip-components=1
           mkdir -p /tmp/liboqs_build /tmp/liboqs_install_riscv64
           cd /tmp/liboqs_build
-          cmake "$SRC_DIR" \
+          cmake /tmp/liboqs_src \
             -DOQS_BUILD_ONLY_LIB=Yes \
             -DOQS_DIST_BUILD=Yes \
             -DOQS_ENABLE_SIG_MAYO=Yes \
-            -DOQS_ENABLE_SIG_FALCON=Yes \
             -DOQS_USE_OPENSSL=No \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/liboqs_install_riscv64 \

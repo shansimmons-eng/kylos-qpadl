@@ -1,3 +1,18 @@
 /target
 /tmp
 *.csv
+*.o
+*.a
+*.so
+*.dylib
+*.csv
+build2.sh
+build3.sh
+# Environment / secrets
+.env
+.env.local
+# Editor
+*.swp
+*.swo
+*~
+.DS_Store
